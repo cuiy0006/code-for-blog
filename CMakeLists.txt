@@ -18,8 +18,10 @@ set(SUBDIRS
     googletest
 )
 
-foreach(dir ${SUBDIRS})
-    add_subdirectory(${dir})
-endforeach()
+# foreach(dir ${SUBDIRS})
+#     add_subdirectory(${dir})
+# endforeach()
+
+add_subdirectory(boost_asio)
 
 enable_testing()

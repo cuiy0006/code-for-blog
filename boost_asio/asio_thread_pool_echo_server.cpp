@@ -2,6 +2,8 @@
 
 #include <boost/asio.hpp>
 #include <array>
+#include <iostream>
+#include <thread>
 
 using boost::asio::ip::tcp;
 
@@ -28,24 +30,36 @@ private:
     void doRead()
     {
         auto self = shared_from_this();
-        socket_.async_read_some(boost::asio::buffer(buffer_, buffer_.size()),
-                                strand_.wrap([this, self](boost::system::error_code ec,
-                                                          std::size_t bytes_transferred)
-                                             {
-                                                 if (!ec)
-                                                 {
-                                                     doWrite(bytes_transferred);
-                                                 }
-                                             }));        
+
+
+        boost::asio::async_read_until(socket_, sb, '\n',
+                                      strand_.wrap([this, self](boost::system::error_code ec,
+                                                        std::size_t bytes_transferred)
+                                            {
+
+                                                std::istream is(&sb);
+                                                std::getline(is, buffer_);
+
+                                                buffer_[buffer_.size() - 1]= '\n';
+
+                                                std::cout << "read callback thread id: " << std::this_thread::get_id() << " ---- " << buffer_ << std::endl;
+                                                if (!ec)
+                                                {
+                                                    std::this_thread::sleep_for(std::chrono::seconds(5));
+                                                    doWrite();
+                                                }
+                                            }));
+
     }
 
-    void doWrite(std::size_t length)
+    void doWrite()
     {
-        auto self = shared_from_this();        
-        boost::asio::async_write(socket_, boost::asio::buffer(buffer_, length),
+        auto self = shared_from_this();
+        boost::asio::async_write(socket_, boost::asio::buffer(buffer_, buffer_.size()),
                                  strand_.wrap([this, self](boost::system::error_code ec,
-                                                           std::size_t /* bytes_transferred */)
+                                                           std::size_t bytes_transferred)
                                               {
+                                                  std::cout << "write callback thread id: " << std::this_thread::get_id() << "-----" << bytes_transferred << std::endl;
                                                   if (!ec)
                                                   {
                                                       doRead();                                         
@@ -56,25 +70,27 @@ private:
 private:
     tcp::socket socket_;
     boost::asio::io_service::strand strand_;
-    std::array<char, 8192> buffer_;
+    std::string buffer_;
+    boost::asio::streambuf sb;
 };
 
 class EchoServer
 {
 public:
-    EchoServer(boost::asio::io_service &io_service, unsigned short port)
-        : io_service_(io_service),
-          acceptor_(io_service, tcp::endpoint(tcp::v4(), port))
+    EchoServer(boost::asio::io_service &main_io_service, boost::asio::io_service &sub_io_service, unsigned short port)
+        : sub_io_service_ptr_(&sub_io_service),
+          acceptor_(main_io_service, tcp::endpoint(tcp::v4(), port))
     {
         doAccept();
     }
 
     void doAccept()
     {
-        auto conn = std::make_shared<TCPConnection>(io_service_);
+        auto conn = std::make_shared<TCPConnection>(*sub_io_service_ptr_);
         acceptor_.async_accept(conn->socket(),
                                [this, conn](boost::system::error_code ec)
                                {
+                                   std::cout << "acceptor callback thread id: " << std::this_thread::get_id() << std::endl;
                                    if (!ec)
                                    {
                                        conn->start();
@@ -84,18 +100,20 @@ public:
     }
     
 private: 
-    boost::asio::io_service &io_service_;
+    std::unique_ptr<boost::asio::io_service> sub_io_service_ptr_;
     tcp::acceptor acceptor_;
 };
 
 int main(int argc, char *argv[])
 {
-    AsioThreadPool pool(4);
+    AsioThreadPool main_pool(1);
+    AsioThreadPool sub_pool(4);
 
     unsigned short port = 5800;
-    EchoServer server(pool.getIOService(), port);
+    EchoServer server(main_pool.getIOService(), sub_pool.getIOService(), port);
 
-    pool.stop();
+    main_pool.stop();
+    sub_pool.stop();
     
     return 0;
 }
