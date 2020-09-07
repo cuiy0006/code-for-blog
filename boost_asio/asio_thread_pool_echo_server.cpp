@@ -106,13 +106,14 @@ private:
 
 int main(int argc, char *argv[])
 {
-    AsioThreadPool main_pool(1);
+    //AsioThreadPool main_pool(1);
+    boost::asio::io_service main_service;
     AsioThreadPool sub_pool(4);
 
     unsigned short port = 5800;
-    EchoServer server(main_pool.getIOService(), sub_pool.getIOService(), port);
+    EchoServer server(main_service, sub_pool.getIOService(), port);
 
-    main_pool.stop();
+    main_service.run();
     sub_pool.stop();
     
     return 0;
